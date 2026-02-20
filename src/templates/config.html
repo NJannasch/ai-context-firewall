@@ -1,0 +1,147 @@
+{{define "content"}}
+<h1>Configuration</h1>
+
+{{if .Saved}}<div style="background:var(--badge-safe-bg);color:var(--badge-safe-fg);padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">Configuration saved.</div>{{end}}
+
+<form method="POST" action="/config">
+    <div class="form-row">
+        <div>
+            <label for="backend_url">Backend Ollama URL</label>
+            <input type="text" id="backend_url" name="backend_url" value="{{.Config.BackendURL}}">
+        </div>
+        <div>
+            <label for="inspector_url">Inspector Ollama URL</label>
+            <input type="text" id="inspector_url" name="inspector_url" value="{{.Config.InspectorURL}}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div>
+            <label for="inspector_model">Inspector Model <span id="model-status" style="font-size:0.75rem;"></span></label>
+            <div style="display:flex;gap:0.5rem;align-items:start;">
+                <select id="inspector_model_select" name="inspector_model" style="flex:1;">
+                    <option value="{{.Config.InspectorModel}}" selected>{{.Config.InspectorModel}}</option>
+                </select>
+                <button type="button" onclick="fetchModels()" style="margin:0;padding:0.5rem 0.75rem;font-size:0.8rem;white-space:nowrap;">Refresh</button>
+            </div>
+            <input type="text" id="inspector_model_manual" placeholder="Or type model name manually" style="margin-top:0.5rem;font-size:0.8rem;" oninput="syncManualModel(this)">
+        </div>
+        <div>
+            <label for="threshold">Threshold (block above): <strong id="threshold-val">{{.Config.Threshold}}</strong></label>
+            <input type="range" id="threshold" name="threshold" min="0" max="100" value="{{.Config.Threshold}}" oninput="document.getElementById('threshold-val').textContent=this.value">
+        </div>
+    </div>
+
+    <label>Inspector Prompt</label>
+    <div class="radio-group">
+        <label><input type="radio" name="active_prompt" value="standard" {{if eq .Config.ActivePrompt "standard"}}checked{{end}}> Standard</label>
+        <label><input type="radio" name="active_prompt" value="strict" {{if eq .Config.ActivePrompt "strict"}}checked{{end}}> Strict</label>
+        <label><input type="radio" name="active_prompt" value="multilingual" {{if eq .Config.ActivePrompt "multilingual"}}checked{{end}}> Multilingual</label>
+        <label><input type="radio" name="active_prompt" value="custom" {{if eq .Config.ActivePrompt "custom"}}checked{{end}}> Custom</label>
+    </div>
+
+    <div id="prompt-preview" style="margin-top:1rem;{{if eq .Config.ActivePrompt "custom"}}display:none{{end}}">
+        <label>Prompt Preview</label>
+        <pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:1rem;font-size:0.8rem;color:var(--text-muted);white-space:pre-wrap;max-height:300px;overflow-y:auto;">{{index .Presets .Config.ActivePrompt}}</pre>
+    </div>
+
+    {{range $name, $text := .Presets}}
+    <template id="prompt-{{$name}}">{{$text}}</template>
+    {{end}}
+
+    <div id="custom-prompt-area" style="{{if ne .Config.ActivePrompt "custom"}}display:none{{end}}">
+        <label for="custom_prompt">Custom Prompt</label>
+        <textarea id="custom_prompt" name="custom_prompt">{{.Config.CustomPrompt}}</textarea>
+    </div>
+
+    <button type="submit">Save Configuration</button>
+</form>
+
+<div style="margin-top:2rem;padding:1rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:0.8rem;color:var(--text-muted);line-height:1.6;">
+    <strong style="color:var(--text);">Performance note:</strong>
+    If backend and inspector use the same Ollama instance with different models, both stay loaded in VRAM simultaneously — no reload penalty.
+    If they don't both fit, Ollama swaps models on each request, adding seconds of latency.
+    Use a small inspector model (e.g. <code style="background:var(--bg);padding:0.1rem 0.3rem;border-radius:3px;">llama3.2:3b</code> ~2GB) to leave room for the backend model.
+    Check loaded models with <code style="background:var(--bg);padding:0.1rem 0.3rem;border-radius:3px;">ollama ps</code>.
+</div>
+
+<script>
+document.querySelectorAll('input[name="active_prompt"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+        var isCustom = this.value === 'custom';
+        document.getElementById('custom-prompt-area').style.display = isCustom ? '' : 'none';
+        document.getElementById('prompt-preview').style.display = isCustom ? 'none' : '';
+        if (!isCustom) {
+            var tpl = document.getElementById('prompt-' + this.value);
+            if (tpl) {
+                document.querySelector('#prompt-preview pre').textContent = tpl.content.textContent;
+            }
+        }
+    });
+});
+
+var currentModel = '{{.Config.InspectorModel}}';
+
+function fetchModels() {
+    var status = document.getElementById('model-status');
+    var select = document.getElementById('inspector_model_select');
+    var url = document.getElementById('inspector_url').value;
+
+    status.textContent = 'loading...';
+    status.style.color = 'var(--text-faint)';
+
+    fetch('/api/models?url=' + encodeURIComponent(url))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                status.textContent = data.error;
+                status.style.color = 'var(--badge-malicious-fg)';
+                return;
+            }
+            var models = data.models || [];
+            if (models.length === 0) {
+                status.textContent = 'no models found';
+                status.style.color = 'var(--badge-suspicious-fg)';
+                return;
+            }
+            select.innerHTML = '';
+            models.forEach(function(m) {
+                var opt = document.createElement('option');
+                opt.value = m.name;
+                opt.textContent = m.name;
+                if (m.name === currentModel) opt.selected = true;
+                select.appendChild(opt);
+            });
+            status.textContent = models.length + ' model' + (models.length !== 1 ? 's' : '');
+            status.style.color = 'var(--badge-safe-fg)';
+            // Clear manual input since we have a selection
+            document.getElementById('inspector_model_manual').value = '';
+        })
+        .catch(function() {
+            status.textContent = 'connection failed';
+            status.style.color = 'var(--badge-malicious-fg)';
+        });
+}
+
+function syncManualModel(input) {
+    var select = document.getElementById('inspector_model_select');
+    if (input.value.trim()) {
+        // Add a custom option and select it
+        var opt = select.querySelector('option[data-manual]');
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.setAttribute('data-manual', 'true');
+            select.appendChild(opt);
+        }
+        opt.value = input.value.trim();
+        opt.textContent = input.value.trim();
+        opt.selected = true;
+    }
+}
+
+// Auto-fetch models on page load
+fetchModels();
+// Re-fetch when inspector URL changes
+document.getElementById('inspector_url').addEventListener('change', fetchModels);
+</script>
+{{end}}

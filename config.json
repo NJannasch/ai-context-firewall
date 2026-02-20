@@ -1,0 +1,8 @@
+{
+  "backend_url": "http://localhost:11434",
+  "inspector_url": "http://localhost:11434",
+  "inspector_model": "llama3.2:3b",
+  "threshold": 70,
+  "active_prompt": "standard",
+  "custom_prompt": ""
+}

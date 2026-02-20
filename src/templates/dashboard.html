@@ -1,0 +1,89 @@
+{{define "content"}}
+<h1>Inspection Log</h1>
+<div class="status-bar">
+    <div>Threshold: <span id="threshold">{{.Config.Threshold}}</span></div>
+    <div>Inspector: <span>{{.Config.InspectorModel}}</span></div>
+    <div>Prompt: <span>{{.Config.ActivePrompt}}</span></div>
+    <div>Total inspections: <span id="total">{{len .Logs}}</span></div>
+    {{if .Logs}}<div style="margin-left:auto;"><button onclick="clearAll()" style="margin:0;padding:0.3rem 0.75rem;background:var(--btn-red);font-size:0.8rem;">Clear all</button></div>{{end}}
+</div>
+
+<div id="log-table">
+{{if .Logs}}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Content</th>
+            <th>Risk</th>
+            <th>Score</th>
+            <th>Explanation</th>
+            <th>Action</th>
+            <th>Inspect</th>
+            <th>Backend</th>
+            <th>Total</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="log-body">
+    {{range .Logs}}
+        <tr id="row-{{.ID}}">
+            <td>{{.Timestamp.Format "15:04:05"}}</td>
+            <td class="content-snippet" title="{{.Content}}">{{.Content}}</td>
+            <td><span class="badge badge-{{.RiskLevel}}">{{.RiskLevel}}</span></td>
+            <td class="score">{{.Score}}</td>
+            <td>{{.Explanation}}</td>
+            <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
+            <td class="score">{{.InspectTimeMs}}ms</td>
+            <td class="score">{{if .BackendTimeMs}}{{.BackendTimeMs}}ms{{else}}—{{end}}</td>
+            <td class="score">{{.TotalTimeMs}}ms</td>
+            <td><button onclick="deleteLog({{.ID}})" style="margin:0;padding:0.15rem 0.4rem;background:transparent;color:var(--text-faint);border:1px solid var(--border);font-size:0.75rem;cursor:pointer;" title="Remove">&times;</button></td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+{{else}}
+<div class="empty">
+    <div style="font-size:2rem;margin-bottom:0.75rem;opacity:0.3;">&#9632; &#9632; &#9632;</div>
+    <div style="font-size:1.1rem;color:var(--text-muted);">Waiting for events</div>
+    <div style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-faint);">Send a request to the proxy at <code style="background:var(--bg-secondary);padding:0.15rem 0.4rem;border-radius:3px;">:11434</code> to see inspection results here.</div>
+    <div class="spinner" style="margin-top:1.5rem;width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;display:inline-block;"></div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</div>
+{{end}}
+</div>
+
+<script>
+function deleteLog(id) {
+    fetch('/api/logs/delete?id=' + id, {method: 'POST'}).then(function() {
+        var row = document.getElementById('row-' + id);
+        if (row) row.remove();
+        var rows = document.querySelectorAll('#log-body tr');
+        document.getElementById('total').textContent = rows.length;
+        if (rows.length === 0) location.reload();
+    });
+}
+
+function clearAll() {
+    if (!confirm('Clear all inspection logs?')) return;
+    fetch('/api/logs/clear', {method: 'POST'}).then(function() {
+        location.reload();
+    });
+}
+
+(function() {
+    var lastTotal = {{len .Logs}};
+    setInterval(function() {
+        fetch('/api/logs')
+            .then(function(r) { return r.json(); })
+            .then(function(logs) {
+                if (logs.length === lastTotal) return;
+                lastTotal = logs.length;
+                document.getElementById('total').textContent = logs.length;
+                location.reload();
+            })
+            .catch(function() {});
+    }, 3000);
+})();
+</script>
+{{end}}
