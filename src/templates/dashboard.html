@@ -19,6 +19,10 @@
             <th>Score</th>
             <th>Explanation</th>
             <th>Action</th>
+            <th title="Inspector model">Inspector</th>
+            <th title="Backend / inference model">Backend</th>
+            <th title="Inspector tokens: prompt / response">I.tok</th>
+            <th title="Backend tokens: prompt / response">B.tok</th>
             <th>Inspect</th>
             <th>Backend</th>
             <th>Total</th>
@@ -29,11 +33,15 @@
     {{range .Logs}}
         <tr id="row-{{.ID}}">
             <td>{{.Timestamp.Format "15:04:05"}}</td>
-            <td class="content-snippet" title="{{.Content}}">{{.Content}}</td>
+            <td class="content-snippet" title="{{.Content}}">{{if .FromTool}}<span class="badge badge-tool" title="Contains tool result data — elevated injection risk">tool</span> {{end}}{{.Content}}</td>
+            <td class="content-snippet" style="max-width:120px;" title="{{.InspectorModel}}">{{.InspectorModel}}</td>
+            <td class="content-snippet" style="max-width:120px;" title="{{.BackendModel}}">{{.BackendModel}}</td>
             <td><span class="badge badge-{{.RiskLevel}}">{{.RiskLevel}}</span></td>
             <td class="score">{{.Score}}</td>
             <td>{{.Explanation}}</td>
             <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
+            <td class="score">{{if .InspectPromptTokens}}{{.InspectPromptTokens}} / {{.InspectEvalTokens}}{{else}}—{{end}}</td>
+            <td class="score">{{if .BackendPromptTokens}}{{.BackendPromptTokens}} / {{.BackendEvalTokens}}{{else}}—{{end}}</td>
             <td class="score">{{.InspectTimeMs}}ms</td>
             <td class="score">{{if .BackendTimeMs}}{{.BackendTimeMs}}ms{{else}}—{{end}}</td>
             <td class="score">{{.TotalTimeMs}}ms</td>

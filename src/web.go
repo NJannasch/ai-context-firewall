@@ -77,16 +77,33 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (ws *WebServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	saved := false
+	saveErr := ""
 
 	if r.Method == http.MethodPost {
 		r.ParseForm()
 
-		threshold, _ := strconv.Atoi(r.FormValue("threshold"))
-		if threshold < 0 {
-			threshold = 0
+		clamp := func(v, lo, hi int) int {
+			if v < lo {
+				return lo
+			}
+			if v > hi {
+				return hi
+			}
+			return v
 		}
-		if threshold > 100 {
-			threshold = 100
+
+		threshold, _ := strconv.Atoi(r.FormValue("threshold"))
+		threshold = clamp(threshold, 0, 100)
+
+		suspiciousAt, _ := strconv.Atoi(r.FormValue("suspicious_at"))
+		suspiciousAt = clamp(suspiciousAt, 0, 100)
+
+		maliciousAt, _ := strconv.Atoi(r.FormValue("malicious_at"))
+		maliciousAt = clamp(maliciousAt, 0, 100)
+
+		maxInspectTokens, _ := strconv.Atoi(r.FormValue("max_inspect_tokens"))
+		if maxInspectTokens < 50 {
+			maxInspectTokens = 50
 		}
 
 		cfg := Config{
@@ -94,12 +111,18 @@ func (ws *WebServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			InspectorURL:   r.FormValue("inspector_url"),
 			InspectorModel: r.FormValue("inspector_model"),
 			Threshold:      threshold,
+			SuspiciousAt:     suspiciousAt,
+			MaliciousAt:      maliciousAt,
+			MaxInspectTokens: maxInspectTokens,
 			ActivePrompt:   r.FormValue("active_prompt"),
 			CustomPrompt:   r.FormValue("custom_prompt"),
 		}
 
-		ws.store.SetConfig(cfg)
-		saved = true
+		if err := ws.store.SetConfig(cfg); err != nil {
+			saveErr = err.Error()
+		} else {
+			saved = true
+		}
 	}
 
 	data := struct {
@@ -107,12 +130,14 @@ func (ws *WebServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		Nav     string
 		Config  Config
 		Saved   bool
+		SaveErr string
 		Presets map[string]string
 	}{
 		Title:   "Configuration",
 		Nav:     "config",
 		Config:  ws.store.GetConfig(),
 		Saved:   saved,
+		SaveErr: saveErr,
 		Presets: presetPrompts,
 	}
 

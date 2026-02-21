@@ -6,12 +6,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 )
 
 func main() {
 	proxyAddr := flag.String("proxy", ":11434", "Proxy listen address")
 	webAddr := flag.String("web", ":8080", "Web UI listen address")
-	configPath := flag.String("config", "/etc/firewall/config.json", "Config file path")
+
+	defaultConfig := "config.json"
+	if exe, err := os.Executable(); err == nil {
+		defaultConfig = filepath.Join(filepath.Dir(exe), "config.json")
+	}
+	configPath := flag.String("config", defaultConfig, "Config file path")
 	flag.Parse()
 
 	// Allow environment variables to override config values

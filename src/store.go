@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -12,22 +13,31 @@ type Config struct {
 	InspectorURL   string `json:"inspector_url"`
 	InspectorModel string `json:"inspector_model"`
 	Threshold      int    `json:"threshold"`
+	SuspiciousAt    int    `json:"suspicious_at"`
+	MaliciousAt     int    `json:"malicious_at"`
+	MaxInspectTokens int   `json:"max_inspect_tokens"`
 	ActivePrompt   string `json:"active_prompt"`
 	CustomPrompt   string `json:"custom_prompt"`
 }
 
 type InspectionLog struct {
-	ID            int           `json:"id"`
-	Timestamp     time.Time     `json:"timestamp"`
-	Content       string        `json:"content"`
-	RiskLevel     string        `json:"risk_level"`
-	Score         int           `json:"score"`
-	Explanation   string        `json:"explanation"`
-	Action        string        `json:"action"`
-	Model         string        `json:"model"`
-	InspectTimeMs int64         `json:"inspect_time_ms"`
-	BackendTimeMs int64         `json:"backend_time_ms"`
-	TotalTimeMs   int64         `json:"total_time_ms"`
+	ID            int       `json:"id"`
+	Timestamp     time.Time `json:"timestamp"`
+	Content       string    `json:"content"`
+	RiskLevel     string    `json:"risk_level"`
+	Score         int       `json:"score"`
+	Explanation   string    `json:"explanation"`
+	Action              string `json:"action"`
+	InspectorModel      string `json:"inspector_model"`
+	BackendModel        string `json:"backend_model"`
+	FromTool            bool   `json:"from_tool"`
+	InspectPromptTokens int    `json:"inspect_prompt_tokens"`
+	InspectEvalTokens   int    `json:"inspect_eval_tokens"`
+	BackendPromptTokens int    `json:"backend_prompt_tokens"`
+	BackendEvalTokens   int    `json:"backend_eval_tokens"`
+	InspectTimeMs int64     `json:"inspect_time_ms"`
+	BackendTimeMs int64     `json:"backend_time_ms"`
+	TotalTimeMs   int64     `json:"total_time_ms"`
 }
 
 const maxLogs = 200
@@ -49,6 +59,9 @@ func NewStore(configPath string) (*Store, error) {
 			InspectorURL:   "http://localhost:11434",
 			InspectorModel: "llama3.2:3b",
 			Threshold:      70,
+			SuspiciousAt:     30,
+			MaliciousAt:      70,
+			MaxInspectTokens: 150,
 			ActivePrompt:   "standard",
 		},
 	}
@@ -77,6 +90,11 @@ func (s *Store) SetConfig(cfg Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
+	}
+	if dir := filepath.Dir(s.configPath); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(s.configPath, data, 0644)
 }

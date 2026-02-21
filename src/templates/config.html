@@ -2,6 +2,7 @@
 <h1>Configuration</h1>
 
 {{if .Saved}}<div style="background:var(--badge-safe-bg);color:var(--badge-safe-fg);padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">Configuration saved.</div>{{end}}
+{{if .SaveErr}}<div style="background:var(--badge-malicious-bg);color:var(--badge-malicious-fg);padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">Failed to write config file: {{.SaveErr}}</div>{{end}}
 
 <form method="POST" action="/config">
     <div class="form-row">
@@ -27,9 +28,28 @@
             <input type="text" id="inspector_model_manual" placeholder="Or type model name manually" style="margin-top:0.5rem;font-size:0.8rem;" oninput="syncManualModel(this)">
         </div>
         <div>
-            <label for="threshold">Threshold (block above): <strong id="threshold-val">{{.Config.Threshold}}</strong></label>
+            <label for="threshold">Block above: <strong id="threshold-val">{{.Config.Threshold}}</strong></label>
             <input type="range" id="threshold" name="threshold" min="0" max="100" value="{{.Config.Threshold}}" oninput="document.getElementById('threshold-val').textContent=this.value">
         </div>
+    </div>
+
+    <div class="form-row">
+        <div>
+            <label for="suspicious_at">Suspicious above: <strong id="suspicious-val">{{.Config.SuspiciousAt}}</strong></label>
+            <input type="range" id="suspicious_at" name="suspicious_at" min="0" max="100" value="{{.Config.SuspiciousAt}}" oninput="document.getElementById('suspicious-val').textContent=this.value">
+        </div>
+        <div>
+            <label for="malicious_at">Malicious above: <strong id="malicious-val">{{.Config.MaliciousAt}}</strong></label>
+            <input type="range" id="malicious_at" name="malicious_at" min="0" max="100" value="{{.Config.MaliciousAt}}" oninput="document.getElementById('malicious-val').textContent=this.value">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div>
+            <label for="max_inspect_tokens">Max inspector tokens: <strong id="max-tokens-val">{{.Config.MaxInspectTokens}}</strong></label>
+            <input type="range" id="max_inspect_tokens" name="max_inspect_tokens" min="50" max="500" value="{{.Config.MaxInspectTokens}}" oninput="document.getElementById('max-tokens-val').textContent=this.value">
+        </div>
+        <div></div>
     </div>
 
     <label>Inspector Prompt</label>

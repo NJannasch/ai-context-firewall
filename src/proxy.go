@@ -33,7 +33,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.handleGenerate(w, r)
 	default:
 		// Pass through all other requests (e.g. /api/tags, /api/show)
-		p.forward(w, r, nil)
+		_, _ = p.forward(w, r, nil)
 	}
 }
 
@@ -59,14 +59,18 @@ func (p *Proxy) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Extract all message content for inspection
 	var parts []string
+	fromTool := false
 	for _, msg := range req.Messages {
 		if msg.Role == "user" || msg.Role == "system" {
 			parts = append(parts, msg.Content)
+		} else if msg.Role == "tool" {
+			parts = append(parts, msg.Content)
+			fromTool = true
 		}
 	}
 	content := strings.Join(parts, "\n\n")
 
-	p.inspectAndForward(w, r, body, content, req.Model)
+	p.inspectAndForward(w, r, body, content, req.Model, fromTool)
 }
 
 func (p *Proxy) handleGenerate(w http.ResponseWriter, r *http.Request) {
@@ -92,10 +96,10 @@ func (p *Proxy) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		content = req.System + "\n\n" + content
 	}
 
-	p.inspectAndForward(w, r, body, content, req.Model)
+	p.inspectAndForward(w, r, body, content, req.Model, false)
 }
 
-func (p *Proxy) inspectAndForward(w http.ResponseWriter, r *http.Request, body []byte, content string, model string) {
+func (p *Proxy) inspectAndForward(w http.ResponseWriter, r *http.Request, body []byte, content string, model string, fromTool bool) {
 	totalStart := time.Now()
 	cfg := p.store.GetConfig()
 
@@ -106,33 +110,39 @@ func (p *Proxy) inspectAndForward(w http.ResponseWriter, r *http.Request, body [
 	if err != nil {
 		log.Printf("inspection error (%dms): %v", inspectMs, err)
 		logEntry := InspectionLog{
-			Content:       truncate(content, 100),
-			RiskLevel:     "unknown",
-			Score:         -1,
-			Explanation:   fmt.Sprintf("inspection failed: %v", err),
-			Action:        "forwarded (inspection error)",
-			Model:         model,
-			InspectTimeMs: inspectMs,
+			Content:        truncate(content, 100),
+			RiskLevel:      "unknown",
+			Score:          -1,
+			Explanation:    fmt.Sprintf("inspection failed: %v", err),
+			Action:         "forwarded (inspection error)",
+			InspectorModel: cfg.InspectorModel,
+			BackendModel:   model,
+			FromTool:       fromTool,
+			InspectTimeMs:  inspectMs,
 		}
 		p.store.AddLog(logEntry)
-		p.forward(w, r, body)
+		_, _ = p.forward(w, r, body)
 		logEntry.TotalTimeMs = time.Since(totalStart).Milliseconds()
 		return
 	}
 
 	action := "forwarded"
-	if result.Score > cfg.Threshold {
+	if result.Score >= cfg.Threshold {
 		action = "blocked"
 	}
 
 	logEntry := InspectionLog{
-		Content:       truncate(content, 100),
-		RiskLevel:     result.RiskLevel,
-		Score:         result.Score,
-		Explanation:   result.Explanation,
-		Action:        action,
-		Model:         model,
-		InspectTimeMs: inspectMs,
+		Content:             truncate(content, 100),
+		RiskLevel:           result.RiskLevel,
+		Score:               result.Score,
+		Explanation:         result.Explanation,
+		Action:              action,
+		InspectorModel:      cfg.InspectorModel,
+		BackendModel:        model,
+		FromTool:            fromTool,
+		InspectPromptTokens: result.PromptTokens,
+		InspectEvalTokens:   result.EvalTokens,
+		InspectTimeMs:       inspectMs,
 	}
 
 	if action == "blocked" {
@@ -145,9 +155,11 @@ func (p *Proxy) inspectAndForward(w http.ResponseWriter, r *http.Request, body [
 	}
 
 	backendStart := time.Now()
-	p.forward(w, r, body)
+	backendPrompt, backendEval := p.forward(w, r, body)
 	backendMs := time.Since(backendStart).Milliseconds()
 
+	logEntry.BackendPromptTokens = backendPrompt
+	logEntry.BackendEvalTokens = backendEval
 	logEntry.BackendTimeMs = backendMs
 	logEntry.TotalTimeMs = time.Since(totalStart).Milliseconds()
 	p.store.AddLog(logEntry)
@@ -186,7 +198,21 @@ func (p *Proxy) respondBlocked(w http.ResponseWriter, r *http.Request, result *I
 	}
 }
 
-func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, body []byte) {
+func extractTokens(data []byte) (prompt, eval int) {
+	var chunk struct {
+		PromptEvalCount int `json:"prompt_eval_count"`
+		EvalCount       int `json:"eval_count"`
+	}
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		json.Unmarshal(line, &chunk)
+	}
+	return chunk.PromptEvalCount, chunk.EvalCount
+}
+
+func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, body []byte) (int, int) {
 	cfg := p.store.GetConfig()
 	targetURL := cfg.BackendURL + r.URL.Path
 	if r.URL.RawQuery != "" {
@@ -203,7 +229,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, body []byte) {
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bodyReader)
 	if err != nil {
 		http.Error(w, "failed to create proxy request", http.StatusInternalServerError)
-		return
+		return 0, 0
 	}
 
 	// Copy headers
@@ -216,7 +242,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, body []byte) {
 	resp, err := p.client.Do(proxyReq)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("backend error: %v", err), http.StatusBadGateway)
-		return
+		return 0, 0
 	}
 	defer resp.Body.Close()
 
@@ -228,9 +254,12 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, body []byte) {
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	// Stream the response body back to the client
-	io.Copy(w, resp.Body)
+	// Tee response so we can extract token counts while streaming
+	var buf bytes.Buffer
+	io.Copy(w, io.TeeReader(resp.Body, &buf))
+	return extractTokens(buf.Bytes())
 }
+
 
 func truncate(s string, maxLen int) string {
 	// Replace newlines for log readability
